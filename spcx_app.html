@@ -673,6 +673,9 @@ function recompute(){
 function stat(k,v,note){return '<div class="stat"><div class="k">'+k+'</div><div class="val">'+v+'</div><div class="note">'+esc(note)+'</div></div>';}
 function row(k,v){return '<div class="row"><span class="k">'+k+'</span><span class="v">'+v+'</span></div>';}
 function money(n){return (n<0?"-$":"$")+Math.abs(Math.round(n)).toLocaleString();}
+// IV provenance: the app prices off a seed/manual IV (no live options feed), so $
+// figures are illustrative by default. refreshLive() updates this from the PC's flag.
+var IV_SEED=true;
 function renderPlan(s,p,level){
   var el=document.getElementById("plan");
   if(!p||!p.contracts){el.innerHTML='<div class="mut">No plan (need a price).</div>';return;}
@@ -686,7 +689,12 @@ function renderPlan(s,p,level){
   h+=row("Greeks","Δ"+g.delta.toFixed(0)+" θ"+g.theta.toFixed(0)+"/d ν"+g.vega.toFixed(0)+"/1%");
   h+=row("Risk-neutral P(S<sub>T</sub>&lt;BE)","~"+(p.pop!=null?p.pop:"?")+"% <span class=\"dim\">(not a win rate; BE "+Math.round((1-p.be/s.price)*100)+"% below spot)</span>");
   h+=row("Invalidate above","$"+p.inval.toFixed(2));
-  el.innerHTML=h;
+  // IV here is a seed/manual estimate — no live options feed is wired — so every $
+  // figure is illustrative. Honest caveat up top so the polish can't read as a quote.
+  if(IV_SEED){ el.innerHTML='<div class="warnline" style="margin-bottom:10px">⚠ IV '+Math.round((s.ivAnnual||0)*100)+
+      '% is a SEED/manual estimate (no live options feed) — debit, max-loss, breakeven &amp; POP below are '+
+      'ILLUSTRATIVE, not a live quote. Confirm the real chain before sizing.</div>'+h; }
+  else { el.innerHTML=h; }
   if(q[0]==="POOR"||p.crushPnl<0){
     el.innerHTML+='<div class="warnline">'+(q[0]==="POOR"?esc(q[1])+" ":"")+
       "IV-crush: if IV falls to "+(p.crushTo*100).toFixed(0)+"% with spot flat, P&L "+money(p.crushPnl)+" (you are net long vega).</div>";
@@ -761,6 +769,7 @@ function refreshLive(){
     .then(function(r){ if(!r.ok) throw new Error("http "+r.status); return r.json(); })
     .then(function(d){
       var inp=d.inputs||{};
+      if(inp.ivSeed!=null) IV_SEED=!!inp.ivSeed;
       ["price","ivAnnual","ivPct","volume","avgVol"].forEach(function(k){ if(inp[k]!=null) STATE[k]=inp[k]; });
       [["recentHighs"],["recentLows"],["recentCloses"],["recentVolumes"]].forEach(function(p){
         if(inp[p[0]]&&inp[p[0]].length) STATE[p[0]]=inp[p[0]].join(","); });

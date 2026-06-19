@@ -466,6 +466,26 @@ def apply_seed(cfg, snap):
         snap.mark("market_cap", snap.market_cap, "derived: price x shares", "DERIVED")
 
 
+def _social_rate_baseline(cfg, rate):
+    """Store the current StockTwits posting rate and return the median of prior
+    rates (the rolling attention baseline) — or None until enough history exists.
+    Lets social_attention compare today's velocity to its own recent norm."""
+    try:
+        c = sqlite3.connect(cfg["db_path"])
+        c.execute("CREATE TABLE IF NOT EXISTS social_rate(ts TEXT, rate REAL)")
+        prior = [r[0] for r in c.execute(
+            "SELECT rate FROM social_rate ORDER BY rowid DESC LIMIT 30").fetchall()]
+        c.execute("INSERT INTO social_rate(ts, rate) VALUES(?,?)",
+                  (datetime.now().isoformat(timespec="seconds"), float(rate)))
+        c.commit(); c.close()
+    except Exception:
+        return None
+    if len(prior) < 5:
+        return None
+    s = sorted(prior); n = len(s)
+    return s[n//2] if n % 2 else (s[n//2-1]+s[n//2])/2
+
+
 def collect_sentiment(cfg, snap):
     """Social sentiment + news. Manual seed wins; else StockTwits (social) and
     Finnhub (news). Social mood and ATTENTION lead the tape on a retail name."""
@@ -484,10 +504,39 @@ def collect_sentiment(cfg, snap):
                 snap.social_sentiment = (bull-bear)/(bull+bear)
                 snap.mark("social_sentiment", round(snap.social_sentiment, 2),
                           f"StockTwits ({bull}🐂/{bear}🐻 of {len(msgs)})", "LIVE")
-                # NOTE: a StockTwits page is ~30 newest messages — NOT a daily mention
-                # count, so it is NOT a valid 'attention' volume (comparing 30 vs a
-                # 30k baseline falsely reads 'attention leaving'). social_volume is left
-                # to the seed/Trends source; wire Google-Trends/ApeWisdom for live attention.
+            # ATTENTION VELOCITY (live, day-1, no price history): the literature finds
+            # social MOOD alone barely predicts returns — the predictive piece is the
+            # posting VELOCITY / spike. An absolute page count (~30 newest msgs) is not a
+            # valid daily volume, but the RATE (messages/hour from the page timestamps)
+            # vs a rolling baseline IS apples-to-apples and is a genuine leading signal
+            # that exists from the first day of trading (it feeds social_attention).
+            try:
+                ts = []
+                for m in msgs:
+                    ca = m.get("created_at")
+                    if ca:
+                        try:
+                            ts.append(datetime.strptime(ca, "%Y-%m-%dT%H:%M:%SZ"))
+                        except Exception:
+                            pass
+                if len(ts) >= 5:
+                    span_h = max((max(ts)-min(ts)).total_seconds()/3600.0, 0.05)
+                    rate = len(ts)/span_h                       # messages per hour
+                    base = _social_rate_baseline(cfg, rate)     # median of prior runs (+stores this one)
+                    snap.social_volume = round(rate, 2)
+                    if base is not None:
+                        snap.social_volume_avg = round(base, 2)
+                        snap.mark("social_volume", round(rate, 2),
+                                  f"StockTwits velocity {rate:.1f} msg/h vs base {base:.1f}", "LIVE")
+                    else:
+                        # No baseline yet: set avg = rate (neutral ratio 1.0) so the seed's
+                        # incompatible ABSOLUTE count can't fill it and fake an 'attention
+                        # leaving' read by mixing scales (rate msg/h vs ~30k count).
+                        snap.social_volume_avg = round(rate, 2)
+                        snap.mark("social_volume", round(rate, 2),
+                                  f"StockTwits velocity {rate:.1f} msg/h (baseline building)", "LIVE")
+            except Exception as e:
+                snap.extras["attention_velocity"] = f"ERR {e}"
         except Exception as e:
             snap.extras["stocktwits"] = f"ERR {e}"
     # news — Finnhub sentiment
@@ -806,16 +855,28 @@ def build_signals(snap, cfg):
 
     manual = cfg.get("manual_squeeze_block", False)
     skew = (snap.call_iv_otm-snap.put_iv_otm) if (snap.call_iv_otm and snap.put_iv_otm) else None
+    # FAIL-CLOSED: a guard may only go GREEN (clear the short) on a MEASURED all-clear
+    # from a real flow feed. A seeded/manual/derived OTM-call value must NOT unblock —
+    # otherwise pasting one number flips the squeeze guard green with no live data.
+    # (RED still fires from any source: blocking on a high reading is the safe side.)
+    _UNVERIFIED = {"MANUAL", "SEEDED", "SEEDED-PROXY", "NO SOURCE", "DERIVED", "ESTIMATED"}
+    flow_status = (snap.sources.get("otm_call_premium") or (None, None, None))[2]
+    flow_unverified = flow_status in _UNVERIFIED
     if manual:
         S.append(Signal("gamma_squeeze", "squeeze", RED, 0, "manual", "MANUAL BLOCK on — live OTM call sweeps; short suppressed"))
     elif snap.otm_call_premium is not None and snap.otm_call_premium >= t["gamma_block_usd"]:
+        src = " (SEED/MANUAL — verify live)" if flow_unverified else ""
         S.append(Signal("gamma_squeeze", "squeeze", RED, 0, round(snap.otm_call_premium/1e6, 1),
-                        f"${snap.otm_call_premium/1e6:.1f}M OTM call sweeps — squeeze risk, short BLOCKED"))
+                        f"${snap.otm_call_premium/1e6:.1f}M OTM call sweeps — squeeze risk, short BLOCKED{src}"))
     elif skew is not None and skew >= t["iv_skew_block"]:
         S.append(Signal("gamma_squeeze", "squeeze", YELLOW, .3, round(skew, 3), f"call IV>put IV by {skew*100:.1f}pts — call demand"))
+    elif snap.otm_call_premium is not None and flow_unverified:
+        # value present but NOT from a live flow feed — never green-light on a seed.
+        S.append(Signal("gamma_squeeze", "squeeze", YELLOW, .4, round(snap.otm_call_premium/1e6, 1),
+                        f"OTM-call premium ${snap.otm_call_premium/1e6:.1f}M is SEED/MANUAL, not live flow — squeeze not ruled out"))
     elif snap.otm_call_premium is not None:
         S.append(Signal("gamma_squeeze", "squeeze", GREEN, 1, round(snap.otm_call_premium/1e6, 1),
-                        f"OTM call buying quiet (${snap.otm_call_premium/1e6:.1f}M) — no squeeze pressure"))
+                        f"OTM call buying quiet (${snap.otm_call_premium/1e6:.1f}M, live) — no squeeze pressure"))
     else:
         S.append(Signal("gamma_squeeze", "squeeze", YELLOW, .4, None, "no flow data — can't rule out a squeeze"))
     return S
@@ -1217,12 +1278,23 @@ def _plan_quality(rr, iv):
     return ("GOOD", f"R:R {rr:.1f}:1 — favorable structure.")
 
 
+def _iv_is_seeded(snap):
+    """True when the volatility driving option prices is a SEED/STALE guess, not a
+    live IV — so POP / breakeven / max-loss are ILLUSTRATIVE, not actionable quotes.
+    (No live single-name IV feed is wired; the daily run prices off a seed.)"""
+    st = (snap.sources.get("iv_annual") or (None, None, None))[2]
+    return isinstance(st, str) and st.upper().startswith("SEED")
+
+
 def build_option_tickets(snap, cfg, plan):
     """A beginner-friendly MENU of ready-to-read options tickets to express the
     bearish thesis, each defined-risk by default. Prices are theoretical
     (Black-Scholes) — verify live and use LIMIT orders. NOT financial advice."""
     if not plan or not snap.price:
         return []
+    illustrative = _iv_is_seeded(snap)
+    seed_warn = (" ⚠ PRICED OFF SEED/STALE IV — these $ figures are ILLUSTRATIVE, "
+                 "not a live quote; confirm the real chain before sizing." if illustrative else "")
     S0 = plan["spot"]; sig = plan["iv"] or 1.0; r = cfg["risk"]["risk_free_rate"]
     exp = plan["expiry"]; T = max(plan["dte"], 1)/365.0
     cap = plan["max_risk_usd"]
@@ -1303,6 +1375,12 @@ def build_option_tickets(snap, cfg, plan):
         "note": "Listed for completeness only. Loss is UNLIMITED if it squeezes up, and a ~95%-locked IPO "
                 "is often impossible/expensive to borrow. Not recommended for non-experts — the defined-risk "
                 "option structures above are far safer."})
+    # Tag every IV-priced ticket when the volatility is a seed/stale guess, so the
+    # polished dollar-exact figures can't be mistaken for a live, actionable quote.
+    for tk in tickets:
+        tk["priced_off_seed_iv"] = illustrative and bool(tk.get("legs"))
+        if tk["priced_off_seed_iv"]:
+            tk["note"] = tk["note"] + seed_warn
     return tickets
 
 
@@ -1595,10 +1673,14 @@ def print_report(snap, S, comp, level, conf, plan, cfg):
         ew = snap.extras.get("early_warning", "")
         comps = ", ".join(f"{k} {v[1]}" for k, v in sorted(scent_components(snap).items(),
                           key=lambda kv: -kv[1][0])[:3])
-        print(f"  SCENT (early fragility)  {sc:.0f}/100 [{snap.scent_state}]  → early-warning: {ew}")
+        print(f"  SCENT (fragility gauge)  {sc:.0f}/100 [{snap.scent_state}]  → ladder: {ew}")
         print(f"     top drivers: {comps}")
-        print("     (SCENT = the up-move is propped/fragile; it is NOT a directional call and never")
-        print("      arms a short alone — only WATCH until a supply catalyst + rollover confirm.)")
+        print("     (SCENT = the up-move is propped/fragile; NOT a directional call and never arms a")
+        print("      short alone — only WATCH until a supply catalyst + rollover confirm.)")
+        print("     ⚠ CAVEAT: price-derived, so it catches only ~25% of historical tops and MISSES the")
+        print("       week-1-2 IPO peaks with no price history (SPCX's own profile right now). Its short")
+        print("       edge INVERTS in IPO-mania regimes. Treat it as a risk-gate, not a leading 'smell-it-")
+        print("       first' signal — a true lead needs live borrow/options-flow, which is not wired.")
 
     tr = track_record(cfg)
     if tr:
@@ -1687,6 +1769,9 @@ def print_report(snap, S, comp, level, conf, plan, cfg):
         print("  " + "-" * 68)
         print(f"  expiry      {plan['expiry']} ({plan['dte']}DTE) — {plan['exp_basis']}")
         print(f"  structure   BUY {plan['contracts']}x  {plan['Klong']:.0f}P / SELL {plan['contracts']}x {plan['Kshort']:.0f}P")
+        if _iv_is_seeded(snap):
+            print(f"  ⚠ IV {plan['iv']*100:.0f}% is SEED/STALE (no live single-name IV feed wired) — every $ figure")
+            print(f"     below (cost, max-loss, breakeven, POP) is ILLUSTRATIVE, not a live quote.")
         print(f"  cost/spread ${plan['spread_cost']:.2f}  → total debit ${plan['cost']:,.0f}  (cap risk ${plan['max_risk_usd']:,.0f})")
         print(f"  max loss    ${plan['max_loss']:,.0f}    max profit ${plan['max_profit']:,.0f}   R:R {plan['rr']:.1f}:1")
         print(f"  breakeven   ${plan['breakeven']:.2f}    ATR ${plan['atr']:.1f}")
@@ -1808,6 +1893,7 @@ def write_live_json(cfg, snap, comp, level, path="spcx_live.json"):
         "inputs": {
             "price": round(snap.price, 2) if snap.price else None,
             "ivAnnual": round(snap.iv_annual*100, 2) if snap.iv_annual else None,
+            "ivSeed": _iv_is_seeded(snap),   # True = IV is a stale guess; $ figures illustrative
             "ivPct": round(snap.iv_percentile*100) if snap.iv_percentile is not None else None,
             "volume": round(snap.volume/1e6, 2) if snap.volume else None,
             "avgVol": round(snap.avg_volume_20d/1e6, 2) if snap.avg_volume_20d else None,
@@ -2048,6 +2134,14 @@ def run_selftest(cfg):
     chk("gamma sweep forces BLOCKED over alignment", lvlof({**base_aligned, "otm_call_premium": 50_000_000}) == BLOCKED)
     chk("bullish catalyst forces BLOCKED over alignment", lvlof({**base_aligned, "bullish_catalyst": True}) == BLOCKED)
     chk("squeeze unevaluated (no flow) forces BLOCKED", lvlof({**base_aligned, "otm_call_premium": None}) == BLOCKED)
+    # FAIL-CLOSED: a seeded/manual OTM-call value below the block threshold must NOT
+    # clear the squeeze guard — only a live flow feed may green-light the short.
+    def lvl_marked(d, status):
+        s = mkfull(**d); s.mark("otm_call_premium", d["otm_call_premium"], "test", status)
+        S = build_signals(s, cfg); c = composite(S)
+        return warning_level(s, S, c, confluence(s, S, cfg))
+    chk("seeded low OTM-call does NOT clear squeeze guard", lvl_marked({**base_aligned, "otm_call_premium": 500_000}, "MANUAL") == BLOCKED)
+    chk("live low OTM-call DOES clear squeeze guard", lvl_marked({**base_aligned, "otm_call_premium": 500_000}, "LIVE") == TRIGGER)
 
     # === monotonicity: a more-bearish input never LOWERS the composite ===
     base_comp = composite(build_signals(mkfull(**base_aligned), cfg)); mono_ok = True
