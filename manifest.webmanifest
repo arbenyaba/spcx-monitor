@@ -1,0 +1,14 @@
+{
+  "name": "SPCX Short-Entry Warning",
+  "short_name": "SPCX",
+  "description": "Early-warning + risk gate for shorting / buying puts on SPCX. Decision-support only.",
+  "start_url": "./spcx_app.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0d1117",
+  "theme_color": "#0d1117",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

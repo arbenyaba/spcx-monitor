@@ -1,0 +1,38 @@
+name: SPCX daily monitor
+
+# Runs the monitor in GitHub's cloud (no laptop needed). It fetches the live
+# SPCX price (Yahoo), computes the verdict, pushes a notification to your phone
+# (ntfy), and commits spcx_live.json back so the hosted app's ↻ Refresh works
+# from anywhere. The monitor uses only the Python standard library (no installs).
+
+on:
+  schedule:
+    - cron: "30 13 * * *"     # 13:30 UTC daily (~16:30 Istanbul). Add more lines for more times.
+  workflow_dispatch: {}        # lets you run it manually from the Actions tab
+
+permissions:
+  contents: write              # to commit the updated spcx_live.json / DB
+
+concurrency:
+  group: spcx-monitor
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run monitor + push phone notification
+        env:
+          SPCX_NTFY_TOPIC: ${{ secrets.SPCX_NTFY_TOPIC }}   # set this secret in repo Settings
+        run: python spcx_monitor.py --daily
+      - name: Commit updated live snapshot
+        run: |
+          git config user.name "spcx-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add spcx_live.json spcx_monitor.db 2>/dev/null || true
+          git commit -m "chore: daily SPCX live update [skip ci]" || echo "no changes to commit"
+          git push || echo "nothing to push"

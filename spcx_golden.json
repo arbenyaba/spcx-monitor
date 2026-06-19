@@ -1,0 +1,215 @@
+[
+  {
+    "name": "blocked_gamma_sweep",
+    "inputs": {
+      "price": 212.45,
+      "iv_annual": 1.1932,
+      "iv_percentile": 0.9,
+      "iv_5d_ago": null,
+      "volume": 241569595,
+      "avg_volume_20d": 300000000,
+      "short_interest_pct_float": null,
+      "short_interest_prev": null,
+      "borrow_fee": null,
+      "borrow_fee_prev": null,
+      "dec_put_volume": 525822,
+      "dec_call_volume": 725926,
+      "insider_sales_30d": null,
+      "otm_call_premium": 14100000,
+      "social_sentiment": 0.68,
+      "social_sentiment_prev": 0.55,
+      "social_volume": 48000,
+      "social_volume_avg": 30000,
+      "news_sentiment": 0.55,
+      "bullish_catalyst": false,
+      "recent_highs": [
+        176.52,
+        195.6,
+        225.64
+      ],
+      "recent_lows": [
+        150.0,
+        165.0,
+        199.98
+      ],
+      "recent_closes": [
+        160.95,
+        192.5,
+        212.45
+      ],
+      "recent_volumes": [
+        410000000.0,
+        300000000.0,
+        241570000.0
+      ],
+      "days_to_next_major": 55,
+      "next_major_label": "Wave 1",
+      "next_major_pct": 20,
+      "next_major_date": "2026-08-11",
+      "major_unlocks": [
+        [
+          "2026-08-11",
+          20
+        ],
+        [
+          "2026-11-09",
+          28
+        ],
+        [
+          "2027-06-13",
+          40
+        ]
+      ]
+    },
+    "expected": {
+      "composite": 20.1,
+      "level": "BLOCKED",
+      "aligned": false,
+      "blockers": [
+        "gamma_squeeze_active"
+      ],
+      "Klong": 200,
+      "Kshort": 165
+    }
+  },
+  {
+    "name": "aligned_trigger",
+    "inputs": {
+      "price": 188.0,
+      "iv_annual": 0.95,
+      "iv_percentile": 0.88,
+      "iv_5d_ago": 1.25,
+      "volume": 150000000.0,
+      "avg_volume_20d": 300000000.0,
+      "short_interest_pct_float": 17,
+      "short_interest_prev": 12,
+      "borrow_fee": 40,
+      "borrow_fee_prev": 60,
+      "dec_put_volume": 95000,
+      "dec_call_volume": 90000,
+      "insider_sales_30d": 2,
+      "otm_call_premium": 500000,
+      "social_sentiment": 0.1,
+      "social_sentiment_prev": 0.6,
+      "social_volume": 18000,
+      "social_volume_avg": 30000,
+      "news_sentiment": -0.1,
+      "bullish_catalyst": false,
+      "recent_highs": [
+        230,
+        215,
+        205
+      ],
+      "recent_lows": [
+        210,
+        195,
+        184
+      ],
+      "recent_closes": [
+        228,
+        205,
+        188
+      ],
+      "recent_volumes": [
+        400000000.0,
+        300000000.0,
+        220000000.0,
+        180000000.0,
+        150000000.0
+      ],
+      "days_to_next_major": 8,
+      "next_major_label": "Wave 1",
+      "next_major_pct": 20,
+      "next_major_date": "2026-08-11",
+      "major_unlocks": [
+        [
+          "2026-08-11",
+          20
+        ],
+        [
+          "2026-11-09",
+          28
+        ]
+      ]
+    },
+    "expected": {
+      "composite": 81.6,
+      "level": "TRIGGER",
+      "aligned": true,
+      "blockers": [],
+      "Klong": 180,
+      "Kshort": 145
+    }
+  },
+  {
+    "name": "squeeze_unevaluated_blocks",
+    "inputs": {
+      "price": 188.0,
+      "iv_annual": 0.95,
+      "iv_percentile": 0.88,
+      "iv_5d_ago": 1.25,
+      "volume": 150000000.0,
+      "avg_volume_20d": 300000000.0,
+      "short_interest_pct_float": 17,
+      "short_interest_prev": 12,
+      "borrow_fee": 40,
+      "borrow_fee_prev": 60,
+      "dec_put_volume": 95000,
+      "dec_call_volume": 90000,
+      "insider_sales_30d": 2,
+      "otm_call_premium": null,
+      "social_sentiment": 0.1,
+      "social_sentiment_prev": 0.6,
+      "social_volume": 18000,
+      "social_volume_avg": 30000,
+      "news_sentiment": -0.1,
+      "bullish_catalyst": false,
+      "recent_highs": [
+        230,
+        215,
+        205
+      ],
+      "recent_lows": [
+        210,
+        195,
+        184
+      ],
+      "recent_closes": [
+        228,
+        205,
+        188
+      ],
+      "recent_volumes": [
+        400000000.0,
+        300000000.0,
+        220000000.0,
+        180000000.0,
+        150000000.0
+      ],
+      "days_to_next_major": 8,
+      "next_major_label": "Wave 1",
+      "next_major_pct": 20,
+      "next_major_date": "2026-08-11",
+      "major_unlocks": [
+        [
+          "2026-08-11",
+          20
+        ],
+        [
+          "2026-11-09",
+          28
+        ]
+      ]
+    },
+    "expected": {
+      "composite": 73.8,
+      "level": "BLOCKED",
+      "aligned": false,
+      "blockers": [
+        "gamma_squeeze_unevaluated"
+      ],
+      "Klong": 180,
+      "Kshort": 145
+    }
+  }
+]
